@@ -23,6 +23,7 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	admissionapi "k8s.io/pod-security-admission/api"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"go.universe.tf/e2etest/pkg/ipfamily"
 )
 
 const secondNamespace = "test-namespace"
@@ -678,4 +679,32 @@ var _ = ginkgo.Describe("IP Assignment", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
+
+	ginkgo.DescribeTable("A service with ips the same as nodeIps", func(tweak service.Tweak) {
+		jig := jigservice.NewTestJig(cs, testNamespace, "default-ns-service")
+		svc, err := jig.CreateLoadBalancerService(context.TODO(),  func(svc *v1.Service) {
+			service.TrafficPolicyCluster(svc)
+			tweak(svc)
+		})
+		Expect(err).To(HaveOccurred())
+		defer service.Delete(cs, svc)
+	},
+		ginkgo.Entry("IPV4 - request IPv4 via custom annotation",
+			func(svc *v1.Service) {
+				nodes, err := cs.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				nodeV4Ips, err := k8s.NodeIPsForFamily(nodes.Items, ipfamily.IPv4, "")
+				Expect(err).NotTo(HaveOccurred())
+				service.WithSpecificIPs(svc, nodeV4Ips...)
+			}),
+		ginkgo.Entry("DUALSTACK - request Dual Stack via custom annotation",
+			func(svc *v1.Service) {
+				nodes, err := cs.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				nodeDualIps, err := k8s.NodeIPsForFamily(nodes.Items, ipfamily.DualStack, "")
+				Expect(err).NotTo(HaveOccurred())
+				service.DualStack(svc)
+				service.WithSpecificIPs(svc, nodeDualIps...)
+			}),
+	)
 })

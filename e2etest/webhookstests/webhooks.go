@@ -35,6 +35,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	clientset "k8s.io/client-go/kubernetes"
+	"go.universe.tf/e2etest/pkg/ipfamily"
 )
 
 var (
@@ -44,6 +46,7 @@ var (
 )
 
 var _ = ginkgo.Describe("Webhooks", func() {
+	var cs clientset.Interface
 	ginkgo.BeforeEach(func() {
 		ginkgo.By("Clearing any previous configuration")
 		err := ConfigUpdater.Clean()
@@ -105,6 +108,26 @@ var _ = ginkgo.Describe("Webhooks", func() {
 			err = ConfigUpdater.Update(resources)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("overlaps with already defined CIDR"))
+
+			nodes, err := cs.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			nodeIps, err := k8s.NodeIPsForFamily(nodes.Items, ipfamily.IPv4, "")
+			Expect(err).NotTo(HaveOccurred())
+
+			ginkgo.By("Creating third IPAddressPool with overlapping addresses of the nodes")
+			resources.Pools = append(resources.Pools, metallbv1beta1.IPAddressPool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "webhooks-test3",
+				},
+				Spec: metallbv1beta1.IPAddressPoolSpec{
+					Addresses: nodeIps,
+				},
+			})
+			err = ConfigUpdater.Update(resources)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("contains nodeIp"))
+
 		})
 	})
 
