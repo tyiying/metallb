@@ -25,6 +25,7 @@ import (
 	"go.universe.tf/metallb/internal/config"
 	"go.universe.tf/metallb/internal/k8s"
 	"go.universe.tf/metallb/internal/k8s/controllers"
+	k8snodes "go.universe.tf/metallb/internal/k8s/nodes"
 	"go.universe.tf/metallb/internal/logging"
 	"go.universe.tf/metallb/internal/version"
 
@@ -46,6 +47,7 @@ type controller struct {
 	client service
 	pools  *config.Pools
 	ips    *allocator.Allocator
+	nodes  []v1.Node
 }
 
 func (c *controller) SetBalancer(l log.Logger, name string, svcRo *v1.Service, _ []discovery.EndpointSlice) controllers.SyncState {
@@ -136,6 +138,14 @@ func (c *controller) SetPools(l log.Logger, pools *config.Pools) controllers.Syn
 	return controllers.SyncStateReprocessAll
 }
 
+func (c *controller) SetNode(l log.Logger, node *v1.Node) controllers.SyncState {
+	if k8snodes.IsNodeExcludedFromBalancers(node) {
+		return controllers.SyncStateSuccess
+	}
+	c.nodes = append(c.nodes, *node)
+	return controllers.SyncStateSuccess
+}
+
 func main() {
 	var (
 		port                = flag.Int("port", 7472, "HTTP listening port for Prometheus metrics")
@@ -213,6 +223,7 @@ func main() {
 		Listener: k8s.Listener{
 			ServiceChanged: c.SetBalancer,
 			PoolChanged:    c.SetPools,
+			NodeChanged:    c.SetNode,
 		},
 		ValidateConfig:      validation,
 		EnableWebhook:       true,
